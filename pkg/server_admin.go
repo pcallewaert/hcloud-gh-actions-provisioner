@@ -16,6 +16,8 @@ import (
 const GITHUB_ACTIONS_LABEL_PREFIX = "hcloud-github-actions-"
 const userdata = `
 #cloud-config
+disable_root: 1
+ssh_pwauth: 0
 write_files:
   - content: |
       #!/bin/bash
@@ -40,20 +42,26 @@ runcmd:
 `
 
 type ServerAdmin struct {
-	githubOwner  string
-	githubPat    string
-	githubClient *github.Client
-	hcloudClient *hcloud.Client
+	githubOwner        string
+	githubPat          string
+	githubClient       *github.Client
+	hcloudClient       *hcloud.Client
+	hcloudFirewallName string
+	hcloudLocation     string
+	hcloudServerType   string
 }
 
-func NewServerAdmin(githubPat string, githubOwner string, hcloudToken string) *ServerAdmin {
+func NewServerAdmin(githubPat, githubOwner, hcloudToken, hcloudFirewallName, hcloudLocation, hcloudServerType string) *ServerAdmin {
 	githubClient := setupGithubClient(githubPat)
 	hcloudClient := setupHcloudClient(hcloudToken)
 	return &ServerAdmin{
-		githubClient: githubClient,
-		hcloudClient: hcloudClient,
-		githubOwner:  githubOwner,
-		githubPat:    githubPat,
+		githubClient:       githubClient,
+		hcloudClient:       hcloudClient,
+		githubOwner:        githubOwner,
+		githubPat:          githubPat,
+		hcloudFirewallName: hcloudFirewallName,
+		hcloudServerType:   hcloudServerType,
+		hcloudLocation:     hcloudLocation,
 	}
 }
 
@@ -154,17 +162,20 @@ func (sa *ServerAdmin) spinUpServer(serverName, userdata string, imageSnapshot i
 	if err != nil {
 		logrus.Fatalf("Error retrieving image: %v", err)
 	}
-	serverType, _, err := sa.hcloudClient.ServerType.GetByName(context.Background(), "cpx21")
+	serverType, _, err := sa.hcloudClient.ServerType.GetByName(context.Background(), sa.hcloudServerType)
 	if err != nil {
 		logrus.Fatalf("Error retrieving servertype: %v", err)
 	}
-	location, _, err := sa.hcloudClient.Location.GetByName(context.Background(), "fsn1")
+	location, _, err := sa.hcloudClient.Location.GetByName(context.Background(), sa.hcloudLocation)
 	if err != nil {
 		logrus.Fatalf("Error retrieving location: %v", err)
 	}
-	firewall, _, err := sa.hcloudClient.Firewall.GetByName(context.Background(), "buildserver-firewall")
-	if err != nil {
-		logrus.Fatalf("Error retrieving firewall: %v", err)
+	var fw *hcloud.Firewall
+	if sa.hcloudFirewallName != "" {
+		fw, _, err = sa.hcloudClient.Firewall.GetByName(context.Background(), sa.hcloudFirewallName)
+		if err != nil {
+			logrus.Fatalf("Error retrieving firewall: %v", err)
+		}
 	}
 	token, _, err := sa.githubClient.Actions.CreateOrganizationRegistrationToken(context.Background(), sa.githubOwner)
 	if err != nil {
@@ -181,7 +192,7 @@ func (sa *ServerAdmin) spinUpServer(serverName, userdata string, imageSnapshot i
 		Location:   location,
 		Name:       serverName,
 		Labels:     map[string]string{"runner": "automated"},
-		Firewalls:  []*hcloud.ServerCreateFirewall{{Firewall: *firewall}},
+		Firewalls:  []*hcloud.ServerCreateFirewall{{Firewall: *fw}},
 		UserData:   formattedUserData,
 	}
 	_, _, err = sa.hcloudClient.Server.Create(context.Background(), opts)
