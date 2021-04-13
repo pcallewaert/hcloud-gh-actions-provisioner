@@ -1,0 +1,51 @@
+#cloud-config
+timezone: UTC
+users:
+  - name: runner
+    groups:
+      - users
+      - admin
+      - docker
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh-authorized-keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDaiKyYKd7XrjniNpb8poL5Ud4Ms17J/L9hO7NlXaJBHc4iTJ/kONqhwtTIjBN6nzBfyv+/k9i5yn2rV0VY+QHEpP+O1JqCl6OrYsDyvJobVQzEXjboEH19oKDPnb0/4s0Vgm+o9Bbe/9NRwly/j383sRBII90JmN+zqQn0ovQQEsJwUpxXaxqvUmZRQKdXgr8vGnVAYTYQ8/3N1tmbmoFj4X9EdvWGJVQ9PMSR+LZ02cAIfpxg/A43kC4w4MBBFg41c4epD8Q+qWXNZBecE9eEjs5i24k2zz9Emc990EVfWuMTWjnMH6rO+Zwj7a3G7erjG0QPvwtdkARvPSylOQsx maffen@gmail.com
+
+manage-resolv-conf: true
+resolv_conf:
+  nameservers:
+    - '8.8.8.8'
+    - '8.8.4.4'
+
+package_update: true
+package_upgrade: true
+# package_reboot_if_required: true
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg-agent
+  - software-properties-common
+  - 'build-essential'
+  - 'git'
+  - 'libpq-dev'
+  - 'imagemagick'
+  - 'unzip'
+  - 'file'
+  - 'fonts-liberation'
+  - 'openjdk-11-jre'
+  - 'tzdata'
+  - 'nodejs'
+  - 'jq'
+  - 'zlib1g-dev'          # Needed for nokogiri gem
+
+runcmd:
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+  - add-apt-repository "deb [arch=$(dpkg --print-architecture)] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+  - apt-get update -y
+  - apt-get install -y docker-ce docker-ce-cli containerd.io
+  - systemctl start docker
+  - systemctl enable docker
+  - mkdir -p /opt/hostedtoolcache
+  - chown 1000:1000 /opt/hostedtoolcache
+  - chmod 775 /opt/hostedtoolcache

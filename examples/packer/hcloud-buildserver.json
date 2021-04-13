@@ -1,0 +1,36 @@
+{
+    "variables": {
+        "hcloud_token": "{{env `HCLOUD_TOKEN`}}"
+    },
+    "sensitive-variables": [
+        "hcloud_token"
+    ],
+    "builders": [
+        {
+            "type": "hcloud",
+            "token": "{{user `hcloud_token`}}",
+            "image": "ubuntu-20.04",
+            "location": "fsn1",
+            "server_type": "cpx21",
+            "ssh_username": "root",
+            "user_data_file": "cloud_config.yaml",
+            "snapshot_name": "buildserver_ubuntu_20_04",
+            "snapshot_labels": {
+                "name": "packer_ubuntu_20_04"
+            }
+        }
+    ],
+    "provisioners": [
+        {
+          "type": "shell",
+          "execute_command": "echo 'packer' | sudo -S sh -c '{{ .Vars }} {{ .Path }}'",
+          "inline": [
+            "echo 'Waiting for cloud-init...'",
+            "while [ ! -f /var/lib/cloud/instance/boot-finished ]; do printf .; sleep 1; done"
+          ],
+          "expect_disconnect": true,
+          "start_retry_timeout": "5s",
+          "pause_before": "1s"
+        }
+    ]
+}
