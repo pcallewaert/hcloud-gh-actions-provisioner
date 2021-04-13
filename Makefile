@@ -7,4 +7,4 @@ lint:
 	golangci-lint run
 
 docker-build:
-	docker build -t docker.pkg.github.com/pcallewaert/hcloud-gh-actions-provisioner/hcloud-gh-actions-provisioner .
+	docker build -t ghcr.io/pcallewaert/hcloud-gh-actions-provisioner .

@@ -14,6 +14,6 @@ jobs:
         with:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          registry: docker.pkg.github.com
-          repository: pcallewaert/hcloud-gh-actions-provisioner/hcloud-gh-actions-provisioner
+          registry: ghcr.io
+          repository: pcallewaert/hcloud-gh-actions-provisioner
           tag_with_ref: true
