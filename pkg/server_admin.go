@@ -13,7 +13,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const GITHUB_ACTIONS_LABEL_PREFIX = "hcloud-github-actions-"
 const userdata = `
 #cloud-config
 disable_root: 1
@@ -65,8 +64,8 @@ func NewServerAdmin(githubPat, githubOwner, hcloudToken, hcloudFirewallName, hcl
 	}
 }
 
-func (sa *ServerAdmin) ScaleTo(number, imageSnapshot int) error {
-	listCurrentlyRunning, err := sa.listRunners()
+func (sa *ServerAdmin) ScaleTo(number, imageSnapshot int, namePrefix string, staticLabels []string) error {
+	listCurrentlyRunning, err := sa.listRunners(namePrefix)
 	if err != nil {
 		return err
 	}
@@ -75,7 +74,7 @@ func (sa *ServerAdmin) ScaleTo(number, imageSnapshot int) error {
 	case delta < 0:
 		logrus.Debug("We have to scale down")
 		for i := 0; i < -delta; i++ {
-			server, err := sa.findServerToRemove(listCurrentlyRunning)
+			server, err := sa.findServerToRemove(listCurrentlyRunning, namePrefix)
 			if err != nil {
 				return err
 			}
@@ -90,9 +89,9 @@ func (sa *ServerAdmin) ScaleTo(number, imageSnapshot int) error {
 	case delta > 0:
 		logrus.Debug("We have to scale up")
 		for i := 0; i < delta; i++ {
-			serverName := fmt.Sprintf("%s%d", GITHUB_ACTIONS_LABEL_PREFIX, time.Now().UnixNano())
+			serverName := fmt.Sprintf("%s%d", namePrefix, time.Now().UnixNano())
 			logrus.Debugf("Spinning up server %s", serverName)
-			sa.spinUpServer(serverName, userdata, imageSnapshot)
+			sa.spinUpServer(serverName, userdata, imageSnapshot, staticLabels)
 		}
 		return nil
 	default:
@@ -102,32 +101,28 @@ func (sa *ServerAdmin) ScaleTo(number, imageSnapshot int) error {
 }
 
 // listRunners only returns the runners we created
-func (sa *ServerAdmin) listRunners() (result []*github.Runner, err error) {
+func (sa *ServerAdmin) listRunners(namePrefix string) (result []*github.Runner, err error) {
 	runners, _, err := sa.githubClient.Actions.ListOrganizationRunners(context.Background(), sa.githubOwner, nil)
 	if err != nil {
 		return
 	}
 	for _, x := range runners.Runners {
-		if found, _ := RunnerLabelsContains(x.Labels, GITHUB_ACTIONS_LABEL_PREFIX); found {
+		if strings.HasPrefix(x.GetName(), namePrefix) {
 			result = append(result, x)
 		}
 	}
 	return
 }
 
-func (sa *ServerAdmin) findServerToRemove(runners []*github.Runner) (*github.Runner, error) {
+func (sa *ServerAdmin) findServerToRemove(runners []*github.Runner, namePrefix string) (*github.Runner, error) {
 	var oldestServer *github.Runner
 	var oldestDate time.Time
 	for _, x := range runners {
-		ok, label := RunnerLabelsContains(x.Labels, GITHUB_ACTIONS_LABEL_PREFIX)
 		if x.GetBusy() {
 			logrus.Debugf("%s is not idle, so we can't delete it", x.GetName())
 			continue
 		}
-		if !ok {
-			return nil, fmt.Errorf("missing %s label, but was in the runner list", GITHUB_ACTIONS_LABEL_PREFIX)
-		}
-		date := strings.TrimPrefix(label, GITHUB_ACTIONS_LABEL_PREFIX)
+		date := strings.TrimPrefix(x.GetName(), namePrefix)
 		i, err := strconv.ParseInt(date, 10, 64)
 		if err != nil {
 			return nil, err
@@ -157,7 +152,7 @@ func (sa *ServerAdmin) removeServer(runnerId int64, serverName string) error {
 	return nil
 }
 
-func (sa *ServerAdmin) spinUpServer(serverName, userdata string, imageSnapshot int) {
+func (sa *ServerAdmin) spinUpServer(serverName, userdata string, imageSnapshot int, staticLabels []string) {
 	image, _, err := sa.hcloudClient.Image.GetByID(context.Background(), imageSnapshot)
 	if err != nil {
 		logrus.Fatalf("Error retrieving image: %v", err)
@@ -183,15 +178,22 @@ func (sa *ServerAdmin) spinUpServer(serverName, userdata string, imageSnapshot i
 		os.Exit(1)
 	}
 	logrus.Debugf("Organization Registration Token: %s", token.GetToken())
-	formattedUserData := fmt.Sprintf(userdata, sa.githubOwner, token.GetToken(), serverName)
+	labels := []string{"hcloud-runner"}
+	labels = append(labels, staticLabels...)
+	labelsJoined := strings.Join(labels, ",")
+	formattedUserData := fmt.Sprintf(userdata, sa.githubOwner, token.GetToken(), labelsJoined)
 	logrus.Debugf("cloud-init config: %s:", formattedUserData)
 	// Setup hcloud server
+	hetznerLabels := map[string]string{"runner": "automated"}
+	for _, x := range staticLabels {
+		hetznerLabels[x] = ""
+	}
 	opts := hcloud.ServerCreateOpts{
 		Image:      image,
 		ServerType: serverType,
 		Location:   location,
 		Name:       serverName,
-		Labels:     map[string]string{"runner": "automated"},
+		Labels:     hetznerLabels,
 		Firewalls:  []*hcloud.ServerCreateFirewall{{Firewall: *fw}},
 		UserData:   formattedUserData,
 	}
