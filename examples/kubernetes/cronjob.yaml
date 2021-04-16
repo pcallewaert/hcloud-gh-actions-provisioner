@@ -1,0 +1,58 @@
+---
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: hcloud-gh-actions-provisioner-scaleup
+spec:
+  schedule: "0 7 * * 1-5"
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          securityContext:
+            runAsUser: 10000
+            runAsGroup: 10000
+            fsGroup: 10000
+          automountServiceAccountToken: false
+          containers:
+          - name: scale-down
+            image: ghcr.io/pcallewaert/hcloud-gh-actions-provisioner:v0.1.0
+            args: ["--number-of-builders=3", "--image-snapshot=<Image snapshot ID>", "--hcloud-firewall-name=<Firewall name>"]
+            securityContext:
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+            envFrom:
+            - secretRef:
+                name: hcloud-gh-actions-provisioner
+          restartPolicy: OnFailure
+---
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: hcloud-gh-actions-provisioner-scaledown
+spec:
+  schedule: "0 18 * * 1-5"
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          securityContext:
+            runAsUser: 10000
+            runAsGroup: 10000
+            fsGroup: 10000
+          automountServiceAccountToken: false
+          containers:
+          - name: scale-down
+            image: ghcr.io/pcallewaert/hcloud-gh-actions-provisioner:v0.1.0
+            args: ["--number-of-builders=1", "--image-snapshot=<Image snapshot ID>", "--hcloud-firewall-name=<Firewall name>"]
+            securityContext:
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              allowPrivilegeEscalation: false
+            envFrom:
+            - secretRef:
+                name: hcloud-gh-actions-provisioner
+          restartPolicy: OnFailure
