@@ -145,6 +145,10 @@ func (sa *ServerAdmin) removeServer(runnerId int64, serverName string) error {
 	if err != nil {
 		return err
 	}
+	// TODO: this is to investigate some strange nil reference error.
+	if server == nil {
+		logrus.Warnf("Retrieved no server object for %s, but we know there should be one.", serverName)
+	}
 	_, err = sa.hcloudClient.Server.Delete(context.Background(), server)
 	if err != nil {
 		return err
