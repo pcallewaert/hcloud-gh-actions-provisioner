@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -73,11 +74,11 @@ func (sa *ServerAdmin) ScaleTo(number, imageSnapshot int, namePrefix string, sta
 	switch delta := number - len(listCurrentlyRunning); {
 	case delta < 0:
 		logrus.Debug("We have to scale down")
-		for i := 0; i < -delta; i++ {
-			server, err := sa.findServerToRemove(listCurrentlyRunning, namePrefix)
-			if err != nil {
-				return err
-			}
+		servers, err := sa.findServersToRemove(listCurrentlyRunning, namePrefix, -delta)
+		if err != nil {
+			return err
+		}
+		for _, server := range servers {
 			if server != nil {
 				logrus.Debugf("Removing server %s", server.GetName())
 				if err := sa.removeServer(server.GetID(), server.GetName()); err != nil {
@@ -102,38 +103,35 @@ func (sa *ServerAdmin) ScaleTo(number, imageSnapshot int, namePrefix string, sta
 
 // listRunners only returns the runners we created
 func (sa *ServerAdmin) listRunners(namePrefix string) (result []*github.Runner, err error) {
+	rg := regexp.MustCompile(fmt.Sprintf("%s\\d+", namePrefix))
 	runners, _, err := sa.githubClient.Actions.ListOrganizationRunners(context.Background(), sa.githubOwner, nil)
 	if err != nil {
 		return
 	}
 	for _, x := range runners.Runners {
-		if strings.HasPrefix(x.GetName(), namePrefix) {
+		if rg.MatchString(x.GetName()) {
 			result = append(result, x)
 		}
 	}
 	return
 }
 
-func (sa *ServerAdmin) findServerToRemove(runners []*github.Runner, namePrefix string) (*github.Runner, error) {
-	var oldestServer *github.Runner
-	var oldestDate time.Time
+func (sa *ServerAdmin) findServersToRemove(runners []*github.Runner, namePrefix string, count int) ([]*github.Runner, error) {
+	activeRunners := []*github.Runner{}
 	for _, x := range runners {
 		if x.GetBusy() {
 			logrus.Debugf("%s is not idle, so we can't delete it", x.GetName())
 			continue
 		}
-		date := strings.TrimPrefix(x.GetName(), namePrefix)
-		i, err := strconv.ParseInt(date, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		tm := time.Unix(0, i)
-		if oldestDate.IsZero() || tm.Before(oldestDate) {
-			oldestServer = x
-			oldestDate = tm
-		}
+		activeRunners = append(activeRunners, x)
 	}
-	return oldestServer, nil
+	if len(activeRunners) <= count {
+		return activeRunners, nil
+	}
+	sort.Slice(activeRunners, func(i, j int) bool {
+		return activeRunners[i].GetName() < activeRunners[j].GetName()
+	})
+	return activeRunners[:count], nil
 }
 
 func (sa *ServerAdmin) removeServer(runnerId int64, serverName string) error {
@@ -141,13 +139,17 @@ func (sa *ServerAdmin) removeServer(runnerId int64, serverName string) error {
 	if err != nil {
 		return err
 	}
+	// TODO: if the github actions remove runner returns 502, we return this as an error
+	// But I noticed the runner was deleted anyway, but because we returned early, the hcloud instance is not removed.
+	// And it's not being picked up in the following runs, as we use the Github Actions runners as our truth.
 	server, _, err := sa.hcloudClient.Server.GetByName(context.Background(), serverName)
 	if err != nil {
 		return err
 	}
 	// TODO: this is to investigate some strange nil reference error.
 	if server == nil {
-		logrus.Warnf("Retrieved no server object for %s, but we know there should be one.", serverName)
+		logrus.Warnf("No server found for %s, but we expected to be one. Skiping deletion of hetzner", serverName)
+		return nil
 	}
 	_, err = sa.hcloudClient.Server.Delete(context.Background(), server)
 	if err != nil {
